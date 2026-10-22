@@ -1,62 +1,43 @@
-# dsh-memory 设计文档（草案）
+# dsh-memory 设计：OpenViking 集成与 Harness 管理页面
 
-> 状态：Draft v0.1 —— 待 GPT/Codex 补全细节后评审。
+状态：已选择 OpenViking 路线。运维工具正在 PR #1 收尾；管理页面尚未实现。
 
-## 1. 问题定义
+## 目标与现状
 
-DeepSeek Harness 的会话是临时的：每次新会话都从零开始。需要一个记忆系统，
-让重要信息（用户偏好、项目决定、常用命令、已解决的问题）能跨会话保留并被检索。
+用户已有 Harness 会话历史以及语音插件；长期记忆补充的是跨会话可检索的信息，不能用“新会话完全无上下文”概括宿主行为。
 
-## 2. 核心概念
+- OpenViking 服务和数据在用户 Mac 上；本地 GGUF 执行向量化，Kimi Coding 云端完成摘要/记忆提取。涉及这些处理的内容会发送给 Kimi。
+- 官方 `@openviking/dsh-memory-plugin` 负责捕获、提交、检索注入和 MCP。语音沿用原生 Session，复用同一记忆链路。
+- 本仓库负责可复现部署、脱敏模板、维护工具及未来的管理页面。源码托管不包含用户记忆数据。
 
-### 2.1 记忆条目（Memory Entry）
+## 数据与所有权
 
-```json
-{
-  "id": "mem_01J...",
-  "created_at": "2026-10-19T10:00:00-07:00",
-  "updated_at": "2026-10-19T10:00:00-07:00",
-  "kind": "preference | fact | decision | procedure",
-  "summary": "一句话摘要，用于列表展示与粗筛",
-  "content": "完整内容（Markdown）",
-  "tags": ["dsh", "plugin"],
-  "source": { "session": "...", "ref": "可选：文件/消息引用" },
-  "ttl_days": null
-}
-```
+不再实现旧草案中的 `store/memories.jsonl`、tombstone API 或独立 SQLite/FTS5。由 OpenViking 的内容与检索 API 管理文件及索引，不绕过服务直接改数据库。
 
-### 2.2 存储
-
-- 主存储：`store/memories.jsonl`（append-only，更新采用 tombstone + 新条目）。
-- 索引：本地 SQLite（FTS5）做关键词检索；可选 embedding 索引做语义检索。
-
-### 2.3 API（草案）
-
-| 方法 | 说明 |
+| 内容 | 归属与预期行为 |
 |---|---|
-| `remember(entry)` | 写入一条记忆 |
-| `recall(query, limit)` | 检索相关记忆 |
-| `forget(id)` | 删除（tombstone） |
-| `list(filter)` | 列出记忆 |
-| `compact()` | 合并 / 清理过期与重复条目 |
+| 个人偏好、通用家庭设备关系 | 用户级空间，相关项目可检索 |
+| 项目决定、工具故障与实现记录 | 对应 workspace peer，自动检索限制到当前项目 |
+| 会话历史 | Harness 原生 Session，不用跨会话记忆替代 |
+| 源码/配置模板 | GitHub；真实凭据和记忆留在本机 |
 
-## 3. 写入策略
+`actor` 是检索视图，仍包含用户级与共享内容，不是租户安全边界。旧的用户级项目事实需要单独整理，不会因切换范围自动迁移。MCP 进程级 peer 与自动检索的会话级 peer 需分别验收；不能把当前 MCP 广搜称为完整项目隔离。
 
-- 显式写入优先：由用户或代理明确调用 `remember`。
-- 自动提取（可选第二阶段）：会话结束时由模型提取候选记忆，人工确认后入库。
+## 写入与检索语义
 
-## 4. 检索与注入
+0.5.26 DSH runtime 的常规提交依据 pending_tokens 阈值；上下文压缩、会话释放另有提交入口。共享 schema 声明的 turn/keep-recent 选项不等于 DSH runtime 已使用。显式 remember 是另一条工具链路，不可代替自动捕获验收。
 
-- 会话开始：注入 `kind=preference` 与最近 N 条高频命中的记忆摘要。
-- 任务进行中：按当前任务关键词 `recall`，只注入 top-k，避免上下文膨胀。
+检索优先 server context，失败可能执行旧端点/原始检索与 legacy peer 兼容查询。`recallContextTimeoutMs` 只控制 context 请求；本版未改上游实现总截止时间，不能据此承诺整轮 ≤8秒。实际情况见 [验收记录](deployment/acceptance.md)。
 
-## 5. 非目标（v1 不做）
+## 运维工具
 
-- 多人协作 / 云端同步。
-- 自动无确认的记忆写入。
+- 内容备份：默认发现用户级 `memories` 与所有 `peers/*/memories`，分页读取 raw 内容，以 URI/文件/hash 清单证明导出范围与完成状态。
+- 恢复：默认仅离线校验/预览；显式 `--apply` 后通过 create 模式写 API，不覆盖异文目标，并逐文件读回核对。索引通过 vectors_only 刷新。
+- 此导出不是原子灾备快照，不含索引、ACL/tags、配置、会话或选定记忆根以外的 identity/soul 等资料。完整灾备需要另备配置、停止相关写入，并验证上游支持的全量导出/恢复路径。
+- 隔离验证：逐条结果 URI 判断用户/共享/当前 peer/其他 peer；统计可辅助但不能豁免 URI 校验。提供确切 sentinel URI 可提高正向命中的证据质量。
 
-## 6. 开放问题
+## 管理页面第一版（后续实现）
 
-1. embedding 用本地模型还是远程 API？
-2. 与 DSH 的集成形态：插件、MCP server，还是独立 CLI？
-3. 记忆冲突（同一事实新旧两版）的裁决策略？
+采用 Harness 侧栏入口，支持列表/搜索、详情、编辑/删除、所属项目、可获得的来源与时间，以及服务状态。服务不提供的来源/时间应标“未知”，不伪造字段；编辑/删除通过既有 API，向量刷新与缓存行为也要验证。
+
+页面必须明确区分：个人与项目范围、已存内容与正在提取、服务错误与空结果。先完成当前运维收尾和本机剩余验收，再实现 UI。未来若增加自有适配层，仅封装接口与页面所需元数据，不另建一个权威记忆库。

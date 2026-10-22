@@ -1,61 +1,48 @@
-# 验收说明（2026-10-22 实机验收）
+# 验收记录与待完成项
 
-环境：macOS（Apple Silicon），OpenViking 0.5.1.1（验收中由 0.5.1 升级），
-@openviking/dsh-memory-plugin 0.5.26，VLM = kimi-for-coding-highspeed，
-Embedding = 本地 bge-small-zh-v1.5-f16。
+以下原始实机结论来自用户提供的 Harness 报告（2026-10-22）；Codex 本轮只完成仓库代码检查与受控模拟API测试，未访问用户Mac。
 
-## 结论总览
+## 原始实机证据（保留）
 
-| # | 验收项 | 判定 |
+环境：macOS Apple Silicon、desktop profile、OpenViking 0.5.1.1、DSH记忆插件0.5.26、Kimi高速版、本地512维GGUF。
+
+| 项目 | 用户本机报告 | 证据范围 |
 |---|---|---|
-| 1 | 实际生效配置核对 | ✅ 通过 |
-| 2 | 完整自动链路（文字） | ✅ 通过（向量化环节曾缺陷，升级后复验通过） |
-| 3 | 语音接入 | ✅ 通过 |
-| 4 | 共享与隔离 | ⚠️ 默认不满足；actor+quotas 方案 API 级验证通过，MCP 有限制（见 findings #5） |
-| 5 | 性能与故障恢复 | ✅ 通过 |
-| 6 | 测试数据清理 | ✅ 通过 |
+| 基础配置与服务 | 通过 | 服务端/插件加载、提取与检索 |
+| 文字自动链路 | 捕获/提交/提取/注入/回答成功 | 首轮向量曾手工reindex补救；升级后自动向量化是在语音轮复验，不混称文字首轮全自动通过 |
+| 语音链路 | 新会话回答正确、注入未进入TTS | 用户报告日志与会话来源标记；不是本轮重录 |
+| 隔离 | 旧API脚本报告5/5 | 旧断言存在误报风险，修复后须重跑；App新配置尚未重启复验，MCP有独立限制 |
+| 服务停止与恢复 | 连接拒绝时聊天继续，队列恢复 | 不是接受连接后不返回的挂起情况 |
 
-## 关键证据
+合成文字测试使用虚构车架号；语音测试使用虚构门禁卡号。用户报告测试实体和服务端测试会话已清理，未随本仓库上传真实聊天或记忆。
 
-**自动链路（文字）**：会话 A（`session-0e4617af`）发送标记为测试用途的事实
-（虚构车架号 ZL-2026-8842）→ 服务端生成 `dsh-session-0e4617af…` 档案（捕获）→
-第 2 条消息后 ~20s 触发提交（00:46:36→00:46:58）→ 提取出含车架号并自动标注
-"测试用途"的实体记忆 → 会话 B（`session-9e2ae790`）提问（问题不含答案），
-其会话文件中 `[plugin:openviking-memory]` 注入块在回答前已含该车架号，助手
-4 秒正确作答（页面截图确认无记忆内容气泡）。
+## 性能数据的含义
 
-**语音链路**：语音会话 A（`session-58e8d9e8`）口述虚构门禁卡号 → 提取为实体记忆
-（可检索 0.85）；新语音会话 B（`session-61ec14f4`）提问，voice-flow.log 记录
-TTS 合成文本为正确答案本身；注入文本在 TTS 日志中 0 次出现（未被朗读）；
-会话文件中注入标记为 `plugin:openviking-memory`，与用户发言严格分离。
+用户报告：空闲CPU约0.7%、RSS约435MB；提取CPU峰值49–55%持续3–6秒；冷启动约7秒。
 
-**性能**：空闲 CPU 0.7% / RSS ~435MB；检索 API 36–86ms（即每次提问的额外等待）；
-提取峰值 CPU 49–55% 持续 3–6s；冷启动 7s 就绪。
+检索API测量36–86ms仅代表被测API调用，**不等于完整pre-step增加的等待**。初始化、备用检索和兼容peer请求也需计入。停服立即连接失败不证明挂起时也能快速继续。
 
-**故障恢复**：停服 115s 期间聊天正常（连接立即失败 0.24ms，不阻塞）；
-恢复后 30s 内待处理队列自动重放成功（服务端会话档案时间戳证实）。
+## 本机配置记录（仍需确认实际加载）
 
-**隔离（API 四象限）**：actor=other-project 查项目事件 → 0 命中；
-actor=本 peer 查项目事件 → 命中；两种身份查个人偏好 → 均命中。
-**注意**：仅当请求携带 quotas（插件设 `recallLimit` 后满足）时成立，见 findings #3。
+- `commitTokenThreshold: 1000`。0.5.26 DSH runtime不读取commitTurnThreshold/commitKeepRecentCount；提交体keep_recent_count=0。观察第二条消息后提交不证明存在两轮阈值。
+- `recallPeerScope: actor`、显式`recallLimit: 10`为本机报告的隔离绕过。显式配额不保证与省略时服务端默认配额相同。
+- `recallContextTimeoutMs: 8000`为一次context请求超时，**不是整轮pre-step截止时间**。
+- 工作区peer为deepseek-harness；本机报告26条项目events已经迁入peer记忆树。
+- 上述新patch在原报告结束时尚未通过App重启生效；模板提交不代表状态改变。
 
-## 配置现状（验收后）
+## Codex本轮自动验证
 
-- `commitTokenThreshold: 1000`（默认 20000，调小让短对话自动提交）
-- `recallPeerScope: "actor"` + `recallLimit: 10`（隔离生效的必要组合）
-- `recallContextTimeoutMs: 8000`（检索等待预算）
-- 工作区 peer：`.openviking/config.json` → `peer.id=deepseek-harness`
-- 26 条本工作区 events 记忆已迁入 `peers/deepseek-harness/memories/events`
-  （迁移前全量备份在本地 `~/backups/openviking-memories-20261022/`，未入库）
+本仓库以Python标准库和受控HTTP服务器运行回归测试：用户+全部项目根发现、分页、日期/点号目录、原文与SHA256、部分失败拒绝恢复、默认恢复不连网、恢复create冲突保护与读回、第三peer泄漏（统计缺失或声称0仍失败）、全局/用户/actor来源、黑洞无响应与取消。
 
-## 清理记录
+本轮24项测试通过；`npm run check`的Python语法/JSON/plist解析及`git diff --check`也通过。这证明维护工具在合成夹具中的行为；**不证明真实OpenViking恢复、模型调用或App配置已经通过**。
 
-测试事实实体（虚构自行车/门禁卡）、5 个测试会话服务端档案、上一轮演示资源
-已全部删除并验证无残留；真实记忆（偏好、智能家居、基础设施实体、events 工作日志）
-完整保留。
+## 待本机完成
 
-## 验收时尚未完成（待办）
+- [ ] 合并实际配置差异并重启App，确认desktop已加载新字段
+- [ ] 用新版脚本重跑隔离，明确sentinel与每条URI结果
+- [ ] 项目A/B GUI反向验证；MCP范围单独确认
+- [ ] 新备份含已迁入peer的events；少量合成内容在一次性子树完成真实恢复/检索演练
+- [ ] 已初始化/新会话、文字/语音的挂起测试，记录整轮等待；8秒目标若未达必须如实标注
+- [ ] 测试后恢复真实服务、队列、语音及普通聊天；清理本次合成测试数据
 
-- [ ] 新 patch（actor/quotas/8s 预算）需重启 App 生效，重启后需在真实会话复验隔离
-- [ ] 慢响应测试（挂起服务验证 8s 预算降级行为，脚本见 ops/scripts/blackhole-server.py）
-- [ ] 其他工作区的 GUI 隔离反向验证
+执行步骤与可交给Harness的提示词见 [HANDOFF.md](HANDOFF.md)。这些待办未完成前，不标记“完整项目隔离和整轮8秒目标已通过”。

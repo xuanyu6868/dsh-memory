@@ -55,3 +55,21 @@
 
 - 本机（Clash 代理环境）uv 装/升级包时报 `tls handshake eof`，curl 正常。
 - 处置：`--default-index https://pypi.tuna.tsinghua.edu.cn/simple` 换镜像源成功。
+
+## 7. 旧内容备份默认遗漏项目空间（本仓库已修复；本机待更新）
+
+旧脚本默认只遍历用户memories，迁移至peers/*/memories的项目事件不会备份；按文件名是否含点猜目录、固定深度与未消费分页，也可能静默遗漏。原文读取默认清理部分记忆字段，不适合原样导出。
+
+本轮默认发现用户及所有peer的memories；使用isDir与has_more/offset分页，读取raw原文，保存URI/hash/完成状态。新增恢复工具默认离线校验，显式apply后只create并读回。模拟API回归通过，真实恢复仍待验收。导出不含索引/ACL等，范围见脚本README。
+
+## 8. 隔离脚本依赖缺失统计而误报（本仓库已修复；原5/5需重跑）
+
+已在隔离夹具复现：返回project-c的内容且不提供other_peer统计，原脚本仍5/5 PASS。新脚本逐条校验URI，拒绝actor请求里任何其他peer/其他用户/未知来源；统计声称0也不能绕过。个人命中使用用户级URI，不再只信self计数。无session_id，避免测试影响会话召回ledger。
+
+## 9. 单次context超时被写成整轮8秒上限（文档已修正；上游行为未改）
+
+8000ms只传给primary context请求。失败时可执行legacy recall、raw检索，初始化及legacy peer查询另计。本轮未更改官方runtime，不能声明增加了总deadline或取消传播。挂起工具修正说明、释放已取消连接并支持有限测试时长；整轮表现必须按HANDOFF在用户Mac验证。
+
+## 当前边界
+
+上述配置绕过与最初安装结果属于本机报告，非本轮重新验证。本轮维护工具已变更，因此旧脚本成绩不自动转成新工具实机成绩。源码时间戳只是安装者的审计依据，不能单独证明与发布包逐字节一致；如需更强证据应比较发布包内容/哈希。

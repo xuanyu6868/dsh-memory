@@ -8,3 +8,15 @@ dist/
 store/
 *.sqlite
 *.sqlite-journal
+
+# Local memory exports, credentials and generated Python files
+backups/
+exports/
+data/
+manifest.json
+__pycache__/
+*.pyc
+*.key
+*.pem
+ov.conf
+ovcli.conf

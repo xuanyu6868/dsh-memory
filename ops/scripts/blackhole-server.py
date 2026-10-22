@@ -1,63 +1,79 @@
 #!/usr/bin/env python3
-"""黑洞服务：接受 TCP 连接但永不返回响应，用于模拟"记忆服务挂起"。
+"""Accept TCP but return no response; test total Harness waiting, not just HTTP.
 
-用途：验证 DSH 记忆插件在服务端挂起时的降级行为——pre-step 检索应在
-recallContextTimeoutMs（当前配置 8000ms）后放弃，聊天/语音继续，
-而不是无限等待（docs/deployment/findings.md 与 acceptance.md 待办项）。
-
-用法:
-    1. 停掉真实服务:  launchctl bootout gui/$(id -u)/ai.openviking.server
-    2. 起黑洞:        python3 blackhole-server.py --port 1933
-    3. 在 DSH 会话发一条消息，观察等待时长与降级行为
-    4. Ctrl-C 停黑洞，恢复真实服务:
-       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openviking.server.plist
-
-可选: --hold N 表示每个连接hold N 秒后主动关闭（默认 0 = 永不返回）。
+Default: loopback port 1933, manual stop. This helper never stops/starts launchd.
+8000ms limits only the context request, NOT initialization, fallback, legacy-peer
+retrieval or the whole pre-step hook. Test both initialized and brand-new sessions.
+See docs/deployment/HANDOFF.md for bounded local operation and recovery steps.
 """
 import argparse
-import socket
+import select
+import socketserver
 import threading
 import time
 
 
-def hold_conn(conn, addr, hold):
-    try:
-        conn.settimeout(None)
-        if hold > 0:
-            time.sleep(hold)
-        else:
-            while True:
-                time.sleep(3600)
-    except (ConnectionResetError, BrokenPipeError, OSError):
-        pass
-    finally:
+class BlackholeServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
+
+    def __init__(self, address, *, hold=0, max_connections=64):
+        self.hold = hold
+        self.stopping = threading.Event()
+        self.slots = threading.BoundedSemaphore(max_connections)
+        super().__init__(address, BlackholeHandler)
+
+    def verify_request(self, request, client_address):
+        return self.slots.acquire(blocking=False)
+
+
+class BlackholeHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        started = time.monotonic()
         try:
-            conn.close()
+            while not self.server.stopping.is_set():
+                if self.server.hold and time.monotonic() - started >= self.server.hold:
+                    return
+                readable, _, _ = select.select([self.request], [], [], 0.1)
+                if readable and not self.request.recv(65536):
+                    return  # Client cancelled/timed out: release socket and slot.
+                # Discard request bytes; no HTTP response and no body logging.
         except OSError:
             pass
+        finally:
+            self.server.slots.release()
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=1933)
-    ap.add_argument("--hold", type=float, default=0, help="每连接hold秒数，0=永不返回")
+    ap.add_argument("--hold", type=float, default=0, help="Close each connection after N seconds; 0 waits for disconnect")
+    ap.add_argument("--duration", type=float, default=0, help="Stop helper after N seconds; 0 means Ctrl-C")
     args = ap.parse_args()
-
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((args.host, args.port))
-    srv.listen(64)
-    print(f"blackhole listening on {args.host}:{args.port} (hold={'forever' if args.hold == 0 else str(args.hold) + 's'})")
+    if args.hold < 0 or args.duration < 0:
+        ap.error("hold/duration must be nonnegative")
+    srv = BlackholeServer((args.host, args.port), hold=args.hold)
+    timer = None
+    if args.duration:
+        def stop():
+            srv.stopping.set()
+            srv.shutdown()
+        timer = threading.Timer(args.duration, stop)
+        timer.daemon = True
+        timer.start()
+    print(f"Blackhole listening at {args.host}:{srv.server_address[1]}; returns no HTTP response", flush=True)
     try:
-        while True:
-            conn, addr = srv.accept()
-            print(f"[{time.strftime('%H:%M:%S')}] accepted {addr[0]}:{addr[1]} (holding, no response)")
-            threading.Thread(target=hold_conn, args=(conn, addr, args.hold), daemon=True).start()
+        srv.serve_forever(poll_interval=0.1)
     except KeyboardInterrupt:
-        print("\nblackhole stopped")
+        pass
     finally:
-        srv.close()
+        if timer:
+            timer.cancel()
+        srv.stopping.set()
+        srv.server_close()
+        print("Blackhole stopped. Restore/check the real service before continuing.", flush=True)
 
 
 if __name__ == "__main__":

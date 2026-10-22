@@ -3,9 +3,9 @@
 <!--
   OpenViking 服务端 launchd 常驻模板（macOS）。
   安装：
-    1. 把 __HOME__ 全部替换为你的家目录绝对路径（plist 不支持 ~）：
-       sed -i '' "s|__HOME__|$HOME|g" ai.openviking.server.plist
-    2. cp ai.openviking.server.plist ~/Library/LaunchAgents/
+    1. 按 docs/deployment/install.md 以 plistlib 渲染 __HOME__ 到目标文件。
+       不修改仓库模板本身；已有目标先备份并比较，避免覆盖本机配置。
+    2. 确保 ~/.openviking/logs 已创建，目标文件在 ~/Library/LaunchAgents/。
     3. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openviking.server.plist
   卸载：launchctl bootout gui/$(id -u)/ai.openviking.server
 -->
