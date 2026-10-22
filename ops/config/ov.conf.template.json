@@ -1,0 +1,31 @@
+{
+  "service_name": "openviking-server",
+  "storage": {
+    "workspace": "~/.openviking/data",
+    "vectordb": {
+      "name": "context",
+      "backend": "local"
+    },
+    "agfs": {
+      "backend": "local"
+    }
+  },
+  "embedding": {
+    "dense": {
+      "provider": "local",
+      "model": "bge-small-zh-v1.5-f16",
+      "dimension": 512
+    }
+  },
+  "vlm": {
+    "provider": "kimi",
+    "model": "kimi-for-coding-highspeed",
+    "api_key": "sk-xxx-REPLACE_ME",
+    "api_base": "https://api.kimi.com/coding",
+    "temperature": 1
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 1933
+  }
+}

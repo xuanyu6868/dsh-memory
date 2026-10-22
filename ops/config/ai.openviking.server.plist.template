@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  OpenViking 服务端 launchd 常驻模板（macOS）。
+  安装：
+    1. 把 __HOME__ 全部替换为你的家目录绝对路径（plist 不支持 ~）：
+       sed -i '' "s|__HOME__|$HOME|g" ai.openviking.server.plist
+    2. cp ai.openviking.server.plist ~/Library/LaunchAgents/
+    3. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openviking.server.plist
+  卸载：launchctl bootout gui/$(id -u)/ai.openviking.server
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.openviking.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/.local/bin/openviking-server</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__HOME__/.openviking</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.openviking/logs/server.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.openviking/logs/server.err.log</string>
+</dict>
+</plist>
