@@ -1,0 +1,11 @@
+{
+  "name": "dsh-memory-ops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenViking integration operations and future Harness memory UI",
+  "scripts": {
+    "test": "python3 -B -m unittest discover -s ops/tests -p 'test_*.py' -v",
+    "check": "python3 -B ops/tests/check_files.py"
+  },
+  "engines": { "node": ">=20" }
+}

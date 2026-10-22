@@ -1,0 +1,37 @@
+# OpenViking 记忆插件配置片段
+# 用途：合并进 DSH profile 的 cordis.patch.yml（如 ~/.dsh/profiles/desktop/cordis.patch.yml）。
+# 以下每个键都对照过 @openviking/dsh-memory-plugin 0.5.26 实际安装源码（runtime.mjs /
+# client.mjs / shared/config-schema.mjs / shared/recall-core.mjs）确认真实生效。
+#
+# 死配置警告（dsh 运行时不读取，写了也没用，已从此片段移除）：
+#   - commitTurnThreshold   —— dsh 代码库零引用（仅供其他 harness）
+#   - commitKeepRecentCount —— client.mjs 提交请求体硬编码 keep_recent_count: 0
+#
+# 真实提交触发条件（dsh）：
+#   1. turn/end 且服务器 pending_tokens >= commitTokenThreshold
+#   2. compaction/start（无条件提交）
+#   3. 会话销毁（dispose，3 秒超时兜底提交）
+
+- id: openviking-memory-runtime
+  config:
+    # 唯一被 dsh runtime 读取的 turn/end 提交触发器（runtime.mjs）。默认 20000；
+    # 调小到 1000 让短对话也能自动提交，代价是记忆提取（VLM 调用）更频繁。
+    commitTokenThreshold: 1000
+
+    # 检索范围。actor = 用户级空间（个人偏好）+ 当前工作区 peer（项目记忆）；
+    # all = 再扫描全部其他 peer（跨项目，降权）。默认 all。
+    recallPeerScope: "actor"
+
+    # 显式设置后插件在检索请求中携带分类 quotas（shared/recall-core.mjs:
+    # `if (limitConfigured) body.quotas = codingQuotas(limit)`），使服务端走
+    # gather_bucket 路径——peer_scope 只在该路径生效（服务端 0.5.1.1 的
+    # gather_flat 路径会忽略 peer_scope，见 docs/deployment/findings.md #3）。
+    # 显式10会发送插件计算的分类配额；不能保证与省略时服务端默认配额相同。
+    # 此绕过仅为本部署报告验证的0.5.1.1行为，升级后需要复验。
+    recallLimit: 10
+
+    # 单次 server-context 请求的超时（毫秒），不是整轮 pre-step 总预算。
+    # 请求失败后上游可能继续 legacy/raw 检索；初始化与兼容 peer 查询另计。
+    # 默认 0 表示按请求功能计算默认值；启用查询扩展/重写时预算不同。
+    # 8秒不得作为已验证的整轮上限，真实等待需按 HANDOFF 两种会话实测。
+    recallContextTimeoutMs: 8000
